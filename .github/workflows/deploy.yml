@@ -37,7 +37,7 @@ jobs:
           docker build -t ghcr.io/${{ github.repository }}:latest .
           docker push ghcr.io/${{ github.repository }}:latest
 
-      - name: Deploy to DigitalOcean VM
+      - name: Deploy to Google cloud VM
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
             set -e
@@ -47,12 +47,17 @@ jobs:
             echo "Pulling latest Docker image..."
             docker pull ghcr.io/${{ github.repository }}:latest
 
-            echo "Stopping existing container..."
-            docker stop next-app || true
-            docker rm next-app || true
+            echo "Finding next available port..."
+            base_port=3001
+            while netstat -tulnp | grep -q ":$base_port"; do
+              base_port=$((base_port+1))
+            done
 
-            echo "Running new container..."
-            docker run -d --name next-app -p 3001:3001 ghcr.io/${{ github.repository }}:latest
+            timestamp=$(date +%s)
+            container_name="next-app-\$timestamp"
+
+            echo "Running new container: \$container_name on port \$base_port..."
+            docker run -d --name \$container_name -p \$base_port:3001 ghcr.io/${{ github.repository }}:latest
 
             echo "Deployment completed!"
           EOF
