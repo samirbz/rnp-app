@@ -1,0 +1,58 @@
+name: Deploy Next.js with Docker
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Debug SSH Variables
+        run: |
+          echo "VM_USER: ${{ secrets.VM_USER }}"
+          echo "VM_HOST: ${{ secrets.VM_HOST }}"
+        shell: bash
+
+      - name: Set up SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VM_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Login to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t ghcr.io/${{ github.repository }}:latest .
+          docker push ghcr.io/${{ github.repository }}:latest
+
+      - name: Deploy to DigitalOcean VM
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.VM_USER }}@${{ secrets.VM_HOST }} << 'EOF'
+            set -e
+            echo "Switching to root..."
+            sudo -i
+
+            echo "Pulling latest Docker image..."
+            docker pull ghcr.io/${{ github.repository }}:latest
+
+            echo "Stopping existing container..."
+            docker stop next-app || true
+            docker rm next-app || true
+
+            echo "Running new container..."
+            docker run -d --name next-app -p 3001:3000 ghcr.io/${{ github.repository }}:latest
+
+            echo "Deployment completed!"
+          EOF
